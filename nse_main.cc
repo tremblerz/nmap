@@ -166,6 +166,31 @@ static int key_was_pressed (lua_State *L)
   return 1;
 }
 
+static int l_read_tty (lua_State *L) {
+  char buf[4096];
+  ssize_t bytes_read = tty_read(buf, sizeof(buf));
+  if (bytes_read > 0) {
+    lua_pushlstring(L, buf, bytes_read);
+    return 1;
+  } else {
+    return nseU_safeerror(L, "%s", strerror(errno));
+  }
+}
+
+static int l_debugger_enabled(lua_State *L) {
+  if (o.nse_debugger_enabled)
+    lua_pushboolean(L, true);
+  else
+    lua_pushboolean(L, false);
+  return 1;
+}
+
+static int l_set_debugger(lua_State *L) {
+  o.nse_debugger_enabled = lua_toboolean(L,1);
+  set_tty_echo(o.nse_debugger_enabled);
+  return 0;
+}
+
 static int scp (lua_State *L)
 {
   static const char * const ops[] = {"printStats", "printStatsIfNecessary",
@@ -203,8 +228,8 @@ static int scan_progress_meter (lua_State *L)
    scripts. */
 static int l_log_write(lua_State *L)
 {
-  static const char *const ops[] = {"stdout", "stderr", NULL};
-  static const int logs[] = {LOG_STDOUT, LOG_STDERR};
+  static const char *const ops[] = {"stdout", "stderr", "debugout", "debugerr", NULL};
+  static const int logs[] = {LOG_STDOUT, LOG_STDERR, LOG_DEBUGOUT, LOG_DEBUGERR};
   int log = logs[luaL_checkoption(L, 1, NULL, ops)];
   log_write(log, "%s", luaL_checkstring(L, 2));
   return 0;
@@ -358,6 +383,9 @@ static void open_cnse (lua_State *L)
     {"fetchfile_absolute", fetchfile_absolute},
     {"fetchscript", fetchscript},
     {"key_was_pressed", key_was_pressed},
+    {"read_tty", l_read_tty},
+    {"debugger_enabled", l_debugger_enabled},
+    {"set_debugger", l_set_debugger},
     {"scan_progress_meter", scan_progress_meter},
     {"timedOut", timedOut},
     {"startTimeOutClock", startTimeOutClock},

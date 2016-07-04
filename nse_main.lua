@@ -119,6 +119,7 @@ local lower = string.lower;
 local match = string.match;
 local sub = string.sub;
 local upper = string.upper;
+local gmatch = string.gmatch;
 
 local table = require "table";
 local concat = table.concat;
@@ -214,8 +215,7 @@ end
 
 -- Some local helper functions --
 
-local log_write, verbosity, debugging =
-    nmap.log_write, nmap.verbosity, nmap.debugging;
+local log_write, verbosity, debugging = nmap.log_write, nmap.verbosity, nmap.debugging;
 local log_write_raw = cnse.log_write;
 
 local function print_verbose (level, fmt, ...)
@@ -232,6 +232,41 @@ end
 
 local function log_error (fmt, ...)
   log_write("stderr", format(fmt, ...));
+end
+
+--- 
+-- Writes to stdout if NSE debugger is enabled
+local function debug_out(fmt, ...)
+  log_write_raw("debugout", format(fmt, ...))
+end
+
+---
+-- Writes to stderr if NSE debugger is enabled
+local function debug_err(fmt, ...)
+  log_write_raw("debugerr", format(fmt, ...))
+end
+
+
+--- Trys to read a line from the tty in a non-blocking manner
+-- It does this by reading bytes incrementally, and returning nil until it has 
+-- collected an entire line to return. Meant to be called when NmapOpts.nse_dubugger_active 
+-- is set because otherwise calls to keywaspressed() will result in the tty being flushed. 
+local readline;
+do
+  local buff = ""
+  function readline()
+    if not find(buff, "\n") then
+      local bytes = cnse.read_tty()
+      if bytes then
+        buff = buff .. bytes
+      end
+    end
+    local line, leftover = match(buff, "(.-)\n(.*)")
+    if line then
+      buff = leftover
+    end
+    return line
+  end
 end
 
 local function table_size (t)
@@ -958,6 +993,43 @@ local function run (threads_iter, hosts)
     end
 
     local nr, nw = table_size(running), table_size(waiting);
+    -- TODO support tab-completion (requires turning echo off), EOF for "exit", "help"
+    if cnse.debugger_enabled() then
+      local line = readline()
+      if line then
+        local words = gmatch(line, "[^%s]+")
+        print(line)
+        local cmd = words()
+        if cmd == "status" then
+          debug_out("Active NSE Script Threads: %d (%d waiting)\n",
+              nr+nw, nw);
+        elseif cmd == "exit" then
+          debug_out("NSE debugger disabled.\n")
+          cnse.set_debugger(false)
+        elseif cmd == "list" then
+          debug_out("Running threads: \n")
+          for co, thread in pairs(all) do
+            debug_out(thread.info .. '\n')
+          end
+        elseif cmd == "kill" then
+          local script_to_kill = words()
+          if script_to_kill then
+            for co, thread in pairs(all) do
+              if thread.id == script_to_kill then
+                all[co], waiting[co], running[co], pending[co], num_threads = nil, nil, nil, nil, num_threads-1;
+                debug_out("Killed script %s: %s\n", script_to_kill, co)
+                thread:close(timeouts, "killed");
+              end
+            end
+          end
+        elseif cmd then
+          print("unknown command given")
+          debug_out("Command not recognized: '" .. cmd .. "'\n")
+        end
+        debug_out(">>")
+      end
+    end
+
     -- total may be 0 if no scripts are running in this phase
     if total > 0 and cnse.key_was_pressed() then
       print_verbose(1, "Active NSE Script Threads: %d (%d waiting)",
