@@ -1405,6 +1405,8 @@ local function main (hosts, scantype)
            end
         end
       -- activate hostrule and portrule scripts
+      elseif scantype == NSE_SCAN then    
+        -- Check hostrules for this host.
         for j, host in ipairs(hosts) do
           for _, script in ipairs(scripts) do
             local thread = script:new_thread("hostrule", host_copy(host));
