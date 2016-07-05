@@ -892,7 +892,7 @@ end
 -- The main loop function for NSE. It handles running all the script threads.
 -- Arguments:
 --   threads  An array of threads (a runlevel) to run.
-local function run (threads_iter, hosts)
+local function run (threads_iter, hosts, phase)
   -- running scripts may be resumed at any time. waiting scripts are
   -- yielded until Nsock wakes them. After being awakened with
   -- nse_restore, waiting threads become pending and later are moved all
@@ -1023,7 +1023,6 @@ local function run (threads_iter, hosts)
             end
           end
         elseif cmd then
-          print("unknown command given")
           debug_out("Command not recognized: '" .. cmd .. "'\n")
         end
         debug_out(">>")
@@ -1086,6 +1085,10 @@ local function run (threads_iter, hosts)
     collectgarbage "step";
   end
 
+  if cnse.debugger_enabled() then
+    debug_out("NSE debugger over for the Scan Phase "..phase..".\n")
+    cnse.set_debugger(false)
+  end
   progress "endTask";
 end
 
@@ -1402,8 +1405,6 @@ local function main (hosts, scantype)
            end
         end
       -- activate hostrule and portrule scripts
-      elseif scantype == NSE_SCAN then
-        -- Check hostrules for this host.
         for j, host in ipairs(hosts) do
           for _, script in ipairs(scripts) do
             local thread = script:new_thread("hostrule", host_copy(host));
@@ -1434,7 +1435,7 @@ local function main (hosts, scantype)
       end
     end
     print_verbose(2, "Starting runlevel %u (of %u) scan.", runlevel, #runlevels);
-    run(wrap(threads_iter), hosts)
+    run(wrap(threads_iter), hosts, scantype)
   end
 
   collectgarbage "collect";
