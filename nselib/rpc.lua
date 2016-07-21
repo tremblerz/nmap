@@ -154,7 +154,7 @@ Comm = {
   -- @return status boolean true on success, false on failure
   -- @return string containing error message (if status is false)
   Connect = function(self, host, port, timeout)
-    local status, err, socket
+    local status, err, socket, try
     status, err = self:ChkProgram()
     if (not(status)) then
       return status, err
@@ -169,6 +169,11 @@ Comm = {
       socket:set_timeout(timeout)
       return socket
     end
+    local catch = function()
+      print("caught")
+      socket:close()
+    end
+    try = nmap.new_try(catch)
     if ( port.protocol == "tcp" ) then
       if nmap.is_privileged() then
         -- Try to bind to a reserved port
@@ -193,15 +198,18 @@ Comm = {
           local resvport = math.random(1, 1024)
           socket = new_socket("udp")
           status, err = socket:bind(nil, resvport)
+
+          print("sudo")
           if status then
-            status, err = socket:connect(host, port)
+            status, err = try(socket:connect(host, port))
             if status or err == "TIMEOUT" then break end
             socket:close()
           end
         end
       else
         socket = new_socket("udp")
-        status, err = socket:connect(host, port)
+        print("non-sudo")
+        status, err = try(socket:connect(host, port))
       end
     end
     if (not(status)) then
