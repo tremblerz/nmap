@@ -57,12 +57,15 @@ types = {
   HINFO = 13,
   MX = 15,
   TXT = 16,
+  SIG = 24,
   AAAA = 28,
   SRV = 33,
   OPT = 41,
   SSHFP = 44,
+  RRSIG = 46,
   NSEC = 47,
   NSEC3 = 50,
+  TLSA = 52,
   AXFR = 252,
   ANY = 255
 }
@@ -1251,6 +1254,33 @@ function(entry, data, pos)
   np, entry.SRV.target = decStr(data, np)
 end
 
+decoder[types.RRSIG] =
+function (entry, data, pos)
+
+  local np = pos - #entry.data
+
+  entry.RRSIG = {}
+
+  entry.RRSIG.typecovered, np = string.unpack(">I2", data, np)
+  entry.RRSIG.algorithm, np = string.unpack(">B", data, np)
+  entry.RRSIG.labels, np = string.unpack(">B", data, np)
+  entry.RRSIG.origttl, np = string.unpack(">I4", data, np)
+  entry.RRSIG.sigexpire, np = string.unpack(">I4", data, np)
+  entry.RRSIG.sigincept, np = string.unpack(">I4", data, np)
+  entry.RRSIG.keytag, np = string.unpack(">H", data, np)
+  entry.RRSIG.signee, np = string.unpack("z", data, np)
+  --np, entry.RRSIG.signee = decStr(data, np)
+  np, entry.RRSIG.signature = bin.unpack(">H" .. 256, data, np)
+  --[[np, entry.SOA.mname = decStr(data, np)
+  np, entry.SOA.rname = decStr(data, np)
+  np, entry.SOA.serial,
+  entry.SOA.refresh,
+  entry.SOA.retry,
+  entry.SOA.expire,
+  entry.SOA.minimum
+  = bin.unpack(">I5", data, np)--]]
+
+end
 -- Decodes returned resource records (answer, authority, or additional part).
 -- @param data Complete encoded DNS packet.
 -- @param count Value of according counter in header.
