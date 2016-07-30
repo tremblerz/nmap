@@ -39,6 +39,7 @@ local stdnse = require "stdnse"
 local string = require "string"
 local table = require "table"
 local base32 = require "base32"
+local base64 = require "base64"
 local unittest = require "unittest"
 _ENV = stdnse.module("dns", stdnse.seeall)
 
@@ -64,6 +65,7 @@ types = {
   SSHFP = 44,
   RRSIG = 46,
   NSEC = 47,
+  DNSKEY = 48,
   NSEC3 = 50,
   TLSA = 52,
   AXFR = 252,
@@ -1268,9 +1270,12 @@ function (entry, data, pos)
   entry.RRSIG.sigexpire, np = string.unpack(">I4", data, np)
   entry.RRSIG.sigincept, np = string.unpack(">I4", data, np)
   entry.RRSIG.keytag, np = string.unpack(">H", data, np)
-  entry.RRSIG.signee, np = string.unpack("z", data, np)
-  --np, entry.RRSIG.signee = decStr(data, np)
-  np, entry.RRSIG.signature = bin.unpack(">H" .. 256, data, np)
+  --entry.RRSIG.signee, np = string.unpack("z", data, np)
+  np, entry.RRSIG.signee = decStr(data, np)
+  entry.RRSIG.signature, np = string.unpack(">c" .. (entry.reslen - (np - (pos - #entry.data))), data, np)
+  --entry.RRSIG.signature = base64.enc(entry.RRSIG.signature)
+  --print(entry.RRSIG.signature)
+  --os.exit()
   --[[np, entry.SOA.mname = decStr(data, np)
   np, entry.SOA.rname = decStr(data, np)
   np, entry.SOA.serial,
@@ -1281,6 +1286,27 @@ function (entry, data, pos)
   = bin.unpack(">I5", data, np)--]]
 
 end
+
+decoder[types.DNSKEY] =
+function (entry, data, pos)
+
+  local np = pos - #entry.data
+  local exponent, length
+  entry.DNSKEY = {}
+
+  entry.DNSKEY.flags, np = string.unpack(">I2", data, np)
+  entry.DNSKEY.protocol, np = string.unpack(">B", data, np)
+  entry.DNSKEY.algorithm, np = string.unpack(">B", data, np)
+  entry.DNSKEY.publicKey = {}
+  length, np = string.unpack(">B", data, np)
+  -- Length MUST be 3 or 1 octet(s) long as per RFC3110
+  if length == 3 or length == 1 then
+    exponent, np = string.unpack(">I" .. length, data, np)
+  end
+  entry.DNSKEY.publicKey.exponent = exponent
+  entry.DNSKEY.publicKey.modulus = string.unpack(">c" .. (entry.reslen - (np - (pos - #entry.data))), data, np)
+end
+
 -- Decodes returned resource records (answer, authority, or additional part).
 -- @param data Complete encoded DNS packet.
 -- @param count Value of according counter in header.
@@ -1294,9 +1320,9 @@ local function decodeRR(data, count, pos)
     pos, currRR.dtype, currRR.class, currRR.ttl = bin.unpack(">SSI", data, pos)
 
     local reslen
-    pos, reslen = bin.unpack(">S", data, pos)
+    pos, currRR.reslen = bin.unpack(">S", data, pos)
 
-    pos, currRR.data = bin.unpack("A" .. reslen, data, pos)
+    pos, currRR.data = bin.unpack("A" .. currRR.reslen, data, pos)
 
     -- try to be smart: decode per type
     if decoder[currRR.dtype] then
