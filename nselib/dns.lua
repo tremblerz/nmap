@@ -1620,6 +1620,10 @@ function update(dname, options)
   return false
 end
 
+function calculate_label_fields(name)
+  
+end
+
 if not unittest.testing() then
   return _ENV
 end

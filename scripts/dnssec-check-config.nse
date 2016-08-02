@@ -21,6 +21,25 @@ license = "Same as Nmap--See https://nmap.org/book/man-legal.html"
 
 categories = {"discovery", "safe"}
 
+--table containing Algorithms supported in DNSSEC and their recommendation level
+ALGO = {
+  ["0"] = "Reserved",
+  ["1"] = "RSA/MD5",
+  ["2"] = "Diffie-Hellman",
+  ["3"] = "DSA/SHA1",
+  ["4"] = "Reserved",
+  ["5"] = "RSA/SHA-1",
+  ["6"] = "DSA-NSEC3-SHA1",
+  ["7"] = "RSASHA1-NSEC3-SHA1",
+  ["8"] = "RSA/SHA-256 RSASHA256",
+  ["9"] = "Reserved",
+  ["10"] = "RSA/SHA-512",
+  ["11"] = "Reserved",
+  ["12"] = "ECC-GOST",
+  ["13"] = "ECDSAP256SHA256",
+  ["14"] = "ECDSAP384SHA384",
+}
+
 local function get_parameters()
   local input_table = {}
 
@@ -103,12 +122,34 @@ Zone = {
     --os.exit()
   end,
 
-  verifysig = function (self)
-    --TODO handle multiple ZSK sent by server
-    --self.opt  
+  verifyRRset = function (self, rrset)
+    local verifyLabel = function(record)
+      local label_value = record.rrset.rrsig.labels
+      local owner_value = dns.calculate_label_fields(record.dname)
+      return label_value <= owner_value 
+    end
+
+    local verifyAlgo = function()
+      return ALGO[rrset.rrsig.algorithm]
+    end
+
+    local verifySignatureTime = function()
+      return os.time() < rrset.rrsig.sigexpire
+    end
+
+    local verifySignerName = function()
+      return string.find(rrset.rrsig.signee, zone_name, 1, true)
+    end
+
+    local verifysignature = function()
+    end
+
+    if ~verifyLabel() then
+      return ""
+    end
   end,
- 
-  verifyRRset = function (self, recordtype)
+
+  getRecord = function (self, recordtype)
     --TODO handle RRSET with more than two RRs
     print(recordtype)
     local status, result = dns.query(self.options.domain, {host = self.options.host.ip, dtype=recordtype, retAll=true, retPkt=true, dnssec=true})
@@ -120,7 +161,7 @@ Zone = {
           for _, rrsig in pairs(result.answers) do
             if rrsig['RRSIG'] and rrsig.RRSIG.typecovered == reply.dtype then
 
-              rrsig_rdata = string.unpack(">c" .. (rrsig.reslen - #rrsig.RRSIG.signature), rrsig.data, 1)
+--[[              rrsig_rdata = string.unpack(">c" .. (rrsig.reslen - #rrsig.RRSIG.signature), rrsig.data, 1)
               local rr = string.pack(">zI2I2I4I2", reply.dname, reply.dtype, reply.class, reply.ttl, reply.reslen)
               local rr_data = string.pack(">zzI4I4I4I4I4", reply[recordtype].mname, reply[recordtype].rname, reply[recordtype].serial, reply[recordtype].refresh, reply[recordtype].retry, reply[recordtype].expire, reply[recordtype].minimum)
               rr = rr..rr_data
@@ -143,9 +184,11 @@ Zone = {
                 --print(openssl.bignum_bn2hex(openssl.bignum_bin2bn(openssl.sha1(signature))))
                 --print(openssl.bignum_bn2hex(openssl.bignum_bin2bn(openssl.sha1("abcd"))))
                 os.exit()
-              end
+              end--]]
+              print_r(rrsig)
             end
           end
+          print_r(reply[recordtype])
         end
       end
     end
@@ -161,7 +204,7 @@ action = function(host, port)
     local x = Zone:new(domain, host)
     x:obtainkey()
     for _, record_type in pairs(input.records) do
-      x:verifyRRset(record_type)
+      x:getRecord(record_type)
     end
   end
   return stdnse.format_output(true, output)
