@@ -1620,8 +1620,13 @@ function update(dname, options)
   return false
 end
 
-function calculate_label_fields(name)
-  
+function num_labels(name)
+  --string.gsub(name, "[%w]+%.?", "%1.")
+  if string.sub(name, #name, #name) ~= '.' then
+    name = name .. '.'
+  end
+  _, count = string.gsub(name, "[%w]+%.", function() return false end)
+  return count
 end
 
 if not unittest.testing() then

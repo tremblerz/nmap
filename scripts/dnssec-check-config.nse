@@ -22,22 +22,22 @@ license = "Same as Nmap--See https://nmap.org/book/man-legal.html"
 categories = {"discovery", "safe"}
 
 --table containing Algorithms supported in DNSSEC and their recommendation level
+--TODO: Update this table
 ALGO = {
-  ["0"] = "Reserved",
-  ["1"] = "RSA/MD5",
-  ["2"] = "Diffie-Hellman",
-  ["3"] = "DSA/SHA1",
-  ["4"] = "Reserved",
-  ["5"] = "RSA/SHA-1",
-  ["6"] = "DSA-NSEC3-SHA1",
-  ["7"] = "RSASHA1-NSEC3-SHA1",
-  ["8"] = "RSA/SHA-256 RSASHA256",
-  ["9"] = "Reserved",
-  ["10"] = "RSA/SHA-512",
-  ["11"] = "Reserved",
-  ["12"] = "ECC-GOST",
-  ["13"] = "ECDSAP256SHA256",
-  ["14"] = "ECDSAP384SHA384",
+  "RSAMD5 (Not Recommended)", --1
+  "DH", --2
+  "DSA (Optional)",  --3
+  "RESERVED", --4
+  "RSASHA1 (Mandatory)",  --5
+  "DSA-NSEC3-SHA1", --6
+  "RSASHA1-NSEC3-SHA1",  --7
+  "RSASHA256",  --8
+  "RESERVED",  --9
+  "RSASHA512",  --10
+  "RESERVED", --11
+  "ECC-GOST",  --12
+  "ECDSAP256SHA256",  --13
+  "ECDSAP384SHA384",  --14
 }
 
 local function get_parameters()
@@ -105,6 +105,8 @@ Zone = {
     o.options.domain = domain
     o.options.host = host
     o.options.dnskey = {}
+    o.output = {}
+    o.rrset = {}
     return o
   end,
 
@@ -118,94 +120,123 @@ Zone = {
         end
       end
     end
-    --print_r(result)
-    --os.exit()
   end,
 
-  verifyRRset = function (self, rrset)
+  verifyRRset = function (self)
     local verifyLabel = function(record)
-      local label_value = record.rrset.rrsig.labels
-      local owner_value = dns.calculate_label_fields(record.dname)
-      return label_value <= owner_value 
+      --print_r(rec_rrsig)
+      local label_value = self.rrset.RRSIG.labels
+      local owner_value = dns.num_labels(rrset[1].dname)
+      return label_value <= owner_value
     end
 
     local verifyAlgo = function()
-      return ALGO[rrset.rrsig.algorithm]
+      return ALGO[rec_rrsig.RRSIG.algorithm]
     end
 
     local verifySignatureTime = function()
-      return os.time() < rrset.rrsig.sigexpire
+      return os.time() < rec_rrsig.RRSIG.sigexpire
     end
 
     local verifySignerName = function()
-      return string.find(rrset.rrsig.signee, zone_name, 1, true)
+      return string.find(rec_rrsig.RRSIG.signee, self.options.domain, 1, true)
     end
 
-    local verifysignature = function()
+    local verifyTypeCovered = function()
+--      return rec_rrsig.RRSIG.typecovered == typecovered
     end
 
-    if ~verifyLabel() then
-      return ""
+    local verifySignature = function()
+      local rrs = ""
+      local rrsig_rdata = string.unpack(">c" .. (rec_rrsig.RRSIG.reslen - #rr.RRSIG.signature), rec_rrsig.RRSIG.data, 1)
+      for _, rr in ipairs(rrset) do
+        local rr = string.pack(">zI2I2I4I2", rr.dname, rr.dtype, rr.class, rr.ttl, rr.reslen)
+        local rdata = string.pack(">zzI4I4I4I4I4", rr.mname, rr.rname, rr.serial, rr.refresh, rr.retry, rr.expire, rr.minimum)
+        rr = rr..rdata
+        rrs = rrs .. rr
+        --print(base64.enc(rrsig.RRSIG.signature))
+        --print(openssl.bignum_bn2hex(openssl.bignum_bin2bn(signature)))
+        --print_r(self.options.dnskey)
+        --print(openssl.bignum_bn2hex(openssl.bignum_bin2bn(result)))
+        --print(#key_record.publicKey.modulus)
+        --print(openssl.bignum_bn2hex(openssl.bignum_bin2bn(signature)))
+        --print(openssl.bignum_bn2hex(openssl.bignum_bin2bn(openssl.sha1(signature))))
+        --print(openssl.bignum_bn2hex(openssl.bignum_bin2bn(openssl.sha1("abcd"))))
+      end
+      local signature = rrsig_rdata..rrs
+      local base = openssl.bignum_bin2bn(rrsig.RRSIG.signature)
+      for _, key_record in pairs(self.options.dnskey) do
+        local exponent = openssl.bignum_bin2bn(key_record.publicKey.exponent)
+        local modulus = openssl.bignum_bin2bn(key_record.publicKey.modulus)
+        local result = openssl.bignum_mod_exp(base, exponent, modulus)
+          result = openssl.bignum_bn2bin(result)
+          print(result)
+          if result == signature then
+            return true
+          end
+      end
+      --None of the keys verified the signature
+      return false
+    end,
+
+    if not verifyLabel() then
+      table.insert(output, "Label: verified")
+      print("label verified")
+    end
+    if not verifySignatureTime() then
+      print("signature time verified")
+    end
+    if not verifySignerName() then
+      print("signer name verified")
+    end
+    if not verifySignature() then
     end
   end,
 
-  getRecord = function (self, recordtype)
+  getRecord = function(self, recordtype)
     --TODO handle RRSET with more than two RRs
-    print(recordtype)
     local status, result = dns.query(self.options.domain, {host = self.options.host.ip, dtype=recordtype, retAll=true, retPkt=true, dnssec=true})
-    --print_r(result)
-    --os.exit()
     if result.answers then
-      for num, reply in pairs(result.answers) do
-        if reply[recordtype] then
-          for _, rrsig in pairs(result.answers) do
-            if rrsig['RRSIG'] and rrsig.RRSIG.typecovered == reply.dtype then
-
---[[              rrsig_rdata = string.unpack(">c" .. (rrsig.reslen - #rrsig.RRSIG.signature), rrsig.data, 1)
-              local rr = string.pack(">zI2I2I4I2", reply.dname, reply.dtype, reply.class, reply.ttl, reply.reslen)
-              local rr_data = string.pack(">zzI4I4I4I4I4", reply[recordtype].mname, reply[recordtype].rname, reply[recordtype].serial, reply[recordtype].refresh, reply[recordtype].retry, reply[recordtype].expire, reply[recordtype].minimum)
-              rr = rr..rr_data
-              signature = rrsig_rdata..rr
-              local base = openssl.bignum_bin2bn(rrsig.RRSIG.signature)
-              print(base64.enc(rrsig.RRSIG.signature))
-              --print(openssl.bignum_bn2hex(openssl.bignum_bin2bn(signature)))
-              --os.exit()
-              --print_r(self.options.dnskey)
-              for _, key_record in pairs(self.options.dnskey) do
-                local exponent = openssl.bignum_bin2bn(key_record.publicKey.exponent)
-                local modulus = openssl.bignum_bin2bn(key_record.publicKey.modulus)
-                local result = openssl.bignum_mod_exp(base, exponent, modulus)
-                result = openssl.bignum_bn2hex(result)
-                print(result)
-                --print(openssl.bignum_bn2hex(openssl.bignum_bin2bn(result)))
-                os.exit()
-                --print(#key_record.publicKey.modulus)
-                --print(openssl.bignum_bn2hex(openssl.bignum_bin2bn(signature)))
-                --print(openssl.bignum_bn2hex(openssl.bignum_bin2bn(openssl.sha1(signature))))
-                --print(openssl.bignum_bn2hex(openssl.bignum_bin2bn(openssl.sha1("abcd"))))
-                os.exit()
-              end--]]
-              print_r(rrsig)
-            end
-          end
-          print_r(reply[recordtype])
-        end
+      for _, record in ipairs(result.answers) do
+        if record[recordtype] or record.RRSIG then
+          table.insert(self.rrset, record)
+        end  
       end
     end
-  end,   
+  end,
+
+  make_output = function(self)
+    local output = {}
+    table.insert(output, "Algorithm: " .. ALGO[rec_rrsig.RRSIG.algorithm])
+    table.insert(output, "Signature Inception: " .. os.date("%x %X", rec_rrsig.RRSIG.sigincept, rec_rrsig.RRSIG.sigincept))
+    table.insert(output, "Signature Expiration: " .. os.date("%x %X", rec_rrsig.RRSIG.sigexpire, rec_rrsig.RRSIG.sigexpire))
+    table.insert(output, "Signer Name: " .. rec_rrsig.RRSIG.signee)
+    table.insert(self.output[2], output)
+  end,
 }
+
 portrule = shortport.port_or_service(53, "domain", {"tcp", "udp"})
 
 action = function(host, port)
-  local output, input = {}, {}
+  local input = {}
+  local x
   input = get_parameters()
-  --local keys = get_keys(input)
   for _, domain in pairs(input.zones) do
-    local x = Zone:new(domain, host)
+    x = Zone:new(domain, host)
     x:obtainkey()
     for _, record_type in pairs(input.records) do
-      x:getRecord(record_type)
+      print_r(x.output)
+      x:getRecords(record_type)
+      local status, reason = x:verifyzone()
+      if status then
+        table.insert(x.output, record_type .. ": verification successful")
+      else
+        table.insert(x.output, record_type .. ": verification unsuccessful (" .. reason .. ")")
+      end
+      local output={}
+      table.insert(x.output, output)
+      x:make_output()
     end
   end
-  return stdnse.format_output(true, output)
+  return stdnse.format_output(true, x.output)
 end
